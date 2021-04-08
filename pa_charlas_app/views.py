@@ -8,17 +8,23 @@ from django.http import HttpResponseRedirect, HttpResponse
 from django.utils import timezone
 from django.contrib.auth.models import User
 
+from django.contrib import messages
+from django.contrib.auth import update_session_auth_hash
+from django.contrib.auth.forms import SetPasswordForm
+
 from django import forms
 import re
 import os
-import datetime
+import datetime as dt
 
 from .models import (
 	Texto, texto_guardar, textos_de_usuario,
 	Charla, Visita, charla_participantes, charlas_que_sigo, charlas_y_ultimo,
-	redes_de_usuario
+	redes_de_usuario,
+	charlas_calendario
 )
 from .forms import TextoForm
+from .util import *
 
 import json
 import base64
@@ -98,6 +104,20 @@ class FacebookDataDeletionView(View): #U: para eliminar datos como pide Facebook
 class FacebookDataDeletionCheckView(View): #U: para eliminar datos como pide Facebook
 	def get(self, request, *args, **kwargs): #U: facbook nos manda un post
 		return HttpResponse('Your data has been deleted', status=200)
+
+def UserPassCambiar(request):
+	if request.method == 'POST':
+		form = SetPasswordForm(request.user, request.POST)
+		if form.is_valid():
+			user = form.save()
+			update_session_auth_hash(request, user)  # Important!
+			messages.success(request, 'Your password was successfully updated!')
+			return redirect('user_pass_cambiar')
+		else:
+			messages.error(request, 'Please correct the error below.')
+	else:
+		form = SetPasswordForm(request.user)
+	return render(request, 'pa_charlas_app/user_pass_cambiar_form.html', { 'form': form })
 
 # S: texto como imagen ####################################
 
@@ -241,7 +261,7 @@ def charla_texto_list(request, charla_titulo=None, pk=None): #U: los textos de U
 	else:
 		charla= get_object_or_404(Charla, titulo= '#'+charla_titulo)
 
-	fh_visita_anterior= datetime.date(1972,1,1) #DFLT: como si hubiera venido hace muchiiiisimo
+	fh_visita_anterior= dt.date(1972,1,1) #DFLT: como si hubiera venido hace muchiiiisimo
 	if request.user.is_authenticated:
 		anteriores= Visita.objects.filter(de_quien= request.user, charla= charla)
 		if len(anteriores)>0: #A: ya vino antes
@@ -271,3 +291,58 @@ def usuario_texto_list(request, username=None, pk=None): #U: los textos de UNA c
 		user= get_object_or_404(User, username= username)
 	textos= textos_de_usuario(user).order_by('fh_creado').all()
 	return render(request, 'pa_charlas_app/texto_list.html', {'object_list': textos, 'titulo': user.username})
+
+# S: Calendario de eventos #################################
+
+def evento_list(request): #U: lista de eventos proximos dias
+	schedule, charla_a_eventos = charlas_calendario(31)
+	
+	return render(request, 'pa_charlas_app/evento_list.html', {'object_list': schedule, 'charla_a_eventos': charla_a_eventos, 'titulo': 'Próximos Eventos'})
+
+def evento_list_ical(request): #U: idem evento_list pero en formato icalendar para importar eg en google, outlook
+	from icalendar import Calendar, Event, vCalAddress, vText
+	import pytz
+
+	when_generated= timezone.now()
+
+	cal = Calendar()
+	cal.add('prodid', '-//PodemosAprender//mxm.dk//')
+	cal.add('version', '2.0')
+
+	organizer = vCalAddress('MAILTO:cal@podemosaprender.org')
+	organizer.params['cn'] = vText('PodemosAprender')
+	organizer.params['role'] = vText('APP')
+
+	schedule, charla_a_eventos = charlas_calendario(31)
+
+	for (when, charla) in schedule:
+		print(when, charla)
+		for evento in charla_a_eventos[f'#{charla}']:
+			event = Event()
+			event['organizer'] = organizer
+			event['uid'] = f'texto/{evento["id"]}/{when.strftime("%Y%m%d")}'
+			#event['location'] = vText('Odense, Denmark')
+
+			txt= re.sub(r'#casual\S+','',evento['texto'])
+			if when.strftime('%H%M')=='0000': #A: no tiene horario
+				hour= 9 #DFLT
+				minute= 0	#DFLT
+				m= re.search('(\d+)(:(\d+))?hs', txt)
+				if not m is None:
+					hour= int(m.group(1))
+					minute= int(m.group(3)) if not m.group(3) is None else 0
+				when= dt.datetime(when.year, when.month, when.day, hour, minute)
+	
+			#FALLA CON GOOGLE #when= pytz.utc.localize( when + dt.timedelta(hours=3) ) #A: pasamos de Arg=GMT-3 a UTC
+			when= when + dt.timedelta(hours=3) #A: pasamos de Arg=GMT-3 a UTC
+
+			event.add('summary', txt)
+			event.add('dtstart', when)
+			event.add('dtend', when+ dt.timedelta(hours=1))
+			event.add('dtstamp', when_generated)
+			event.add('priority', 5)
+
+			cal.add_component(event)
+
+	return HttpResponse( cal.to_ical(), content_type='text/calendar')
+

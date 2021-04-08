@@ -18,9 +18,11 @@ urlpatterns = [
 	path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
 	path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
 	path('api/token/verify/', TokenVerifyView.as_view(), name='token_verify'),
+	path('api/token/user/', views_rest.token_user, name='token_user'),
 	#A: documentacion y autenticacion de la api REST
 
 	path("login/", views.login, name="login"),
+	path("clave/", login_required(views.UserPassCambiar), name="user_pass_cambiar"),
 	path("facebook_delete_data/", views.FacebookDataDeletionView.as_view(), name="facebook_delete_data"),
 	path("facebook_delete_data_check/<str:code>/", views.FacebookDataDeletionCheckView.as_view(), name="facebook_delete_data_check"),
 	#A: login desde la UI web
@@ -43,6 +45,9 @@ urlpatterns = [
 	path('charla/<str:charla_titulo>/', views.charla_texto_list, name='charla_texto_list_t'),
 	#A: en general miramos charlas por id o por titulo
 
+	path('evento/', views.evento_list, name='evento_list'),
+	path('evento/ical/', views.evento_list_ical, name='evento_list_ical'),
+	#A: Agenda de eventos
 
 	path('usuario/', views.usuario_list, name='usuario_list'), #TODO: poner login_required?
 	path('usuario/<int:pk>/', views.usuario_texto_list, name='usuario_texto_list_k'), #TODO: poner login_required?
